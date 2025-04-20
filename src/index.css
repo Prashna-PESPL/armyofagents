@@ -1,0 +1,78 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply bg-space-black text-white font-inter;
+    overflow-x: hidden;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-space-grotesk font-bold;
+  }
+}
+
+@layer components {
+  .container-custom {
+    @apply container mx-auto px-4 sm:px-6 lg:px-8 max-w-7xl;
+  }
+  
+  .btn-primary {
+    @apply bg-electric-blue text-space-black font-bold py-3 px-8 rounded-full 
+           transition-all duration-300 hover:shadow-[0_0_15px_rgba(0,240,255,0.7)] 
+           active:translate-y-0.5 active:shadow-none;
+  }
+  
+  .card {
+    @apply rounded-2xl bg-space-dark p-5 border border-space-light hover:border-electric-blue/30 
+           transition-all duration-300;
+  }
+
+  .hexagon {
+    clip-path: polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%);
+  }
+}
+
+#canvas-container {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: -1;
+  opacity: 0.2;
+}
+
+.progress-bar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 4px;
+  background: linear-gradient(90deg, #00F0FF, #9D00FF);
+  transform-origin: 0%;
+  z-index: 50;
+}
+
+@keyframes shine {
+  0% {
+    background-position: 200% center;
+  }
+  100% {
+    background-position: -200% center;
+  }
+}
+
+.gradient-text {
+  background: linear-gradient(90deg, #00F0FF, #9D00FF, #FF00E5, #00F0FF);
+  background-size: 400% auto;
+  color: transparent;
+  background-clip: text;
+  -webkit-background-clip: text;
+  animation: shine 8s linear infinite;
+}
