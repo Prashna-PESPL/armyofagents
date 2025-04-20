@@ -1,5 +1,6 @@
 import React from 'react';
 import { motion } from 'framer-motion';
+import { useNavigate } from 'react-router-dom';
 import { Agent } from '../types';
 
 interface AgentCardProps {
@@ -8,6 +9,8 @@ interface AgentCardProps {
 }
 
 const AgentCard: React.FC<AgentCardProps> = ({ agent, index }) => {
+  const navigate = useNavigate();
+
   const cardVariants = {
     hidden: { 
       opacity: 0,
@@ -23,12 +26,18 @@ const AgentCard: React.FC<AgentCardProps> = ({ agent, index }) => {
     }
   };
 
+  const handleClick = () => {
+    if (agent.name === "BFF Bot") {
+      navigate('/bff-agent');
+    }
+  };
+
   // Calculate delay based on index for staggered animation
   const delay = index * 0.1;
 
   return (
     <motion.div
-      className="card overflow-hidden"
+      className="card overflow-hidden cursor-pointer"
       variants={cardVariants}
       transition={{ delay }}
       whileHover={{ 
@@ -36,6 +45,7 @@ const AgentCard: React.FC<AgentCardProps> = ({ agent, index }) => {
         boxShadow: '0 10px 25px -5px rgba(0, 240, 255, 0.1)',
         borderColor: 'rgba(0, 240, 255, 0.5)'
       }}
+      onClick={handleClick}
     >
       <div className="relative mb-4 overflow-hidden rounded-xl aspect-square">
         <motion.div

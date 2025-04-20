@@ -6,6 +6,7 @@ import EmojiPicker from 'emoji-picker-react';
 import ChatMessage from './ChatMessage';
 import VoiceRecorder from './VoiceRecorder';
 import { Message } from '../../types';
+import { supabase } from '../../lib/supabase';
 
 const ChatInterface: React.FC = () => {
   const [messages, setMessages] = useState<Message[]>([
@@ -20,22 +21,98 @@ const ChatInterface: React.FC = () => {
   const [isTyping, setIsTyping] = useState(false);
   const [isSoundEnabled, setIsSoundEnabled] = useState(true);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
-  const [isVoiceMode, setIsVoiceMode] = useState(false);
+  const [isVoiceModeActive, setIsVoiceModeActive] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [isInitialized, setIsInitialized] = useState(false);
   
   const chatContainerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
-  const messageSound = useRef(new Audio('/message.mp3'));
+  const messageSound = useRef<HTMLAudioElement | null>(null);
 
   useEffect(() => {
-    scrollToBottom();
-    
-    if (window.speechSynthesis) {
-      window.speechSynthesis.onvoiceschanged = () => {
-        window.speechSynthesis.getVoices();
-      };
+    let mounted = true;
+
+    const init = async () => {
+      try {
+        console.log('Initializing ChatInterface...');
+        
+        // Check for required environment variables
+        const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+        const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+
+        if (!supabaseUrl || supabaseUrl === 'your_supabase_url') {
+          throw new Error('Supabase URL is not configured. Please update your .env file with a valid Supabase URL.');
+        }
+
+        if (!supabaseKey || supabaseKey === 'your_supabase_anon_key') {
+          throw new Error('Supabase anonymous key is not configured. Please update your .env file with a valid Supabase anonymous key.');
+        }
+
+        console.log('Environment variables loaded successfully');
+
+        // Initialize audio (optional)
+        try {
+          messageSound.current = new Audio('/message.mp3');
+          messageSound.current.load();
+          console.log('Audio initialized successfully');
+        } catch (audioError) {
+          console.warn('Could not initialize audio:', audioError);
+          setIsSoundEnabled(false);
+        }
+        
+        // Initialize speech synthesis
+        if ('speechSynthesis' in window) {
+          const voices = window.speechSynthesis.getVoices();
+          if (voices.length === 0) {
+            window.speechSynthesis.onvoiceschanged = () => {
+              console.log('Speech synthesis voices loaded');
+              // Test speech synthesis after voices are loaded
+              if (mounted) {
+                speakMessage('Welcome to Army of Agents!');
+              }
+            };
+          } else {
+            // Test speech synthesis immediately if voices are already loaded
+            if (mounted) {
+              speakMessage('Welcome to Army of Agents!');
+            }
+          }
+          console.log('Speech synthesis initialized with', voices.length, 'voices');
+        } else {
+          console.warn('Speech synthesis not supported in this browser');
+          setIsSoundEnabled(false);
+        }
+
+        if (mounted) {
+          setIsInitialized(true);
+          scrollToBottom();
+          console.log('ChatInterface initialized successfully');
+        }
+      } catch (err) {
+        console.error('Error initializing ChatInterface:', err);
+        if (mounted) {
+          setError(err instanceof Error ? err.message : 'Failed to initialize chat interface');
+        }
+      }
+    };
+
+    init();
+
+    return () => {
+      mounted = false;
+      if (window.speechSynthesis) {
+        window.speechSynthesis.cancel();
+      }
+      console.log('ChatInterface cleanup');
+    };
+  }, []);
+
+  useEffect(() => {
+    if (isInitialized) {
+      scrollToBottom();
     }
-  }, [messages]);
+  }, [messages, isInitialized]);
 
   const scrollToBottom = () => {
     if (chatContainerRef.current) {
@@ -43,24 +120,72 @@ const ChatInterface: React.FC = () => {
     }
   };
 
-  const getBotResponse = async (messageHistory: Message[]) => {
+  const speakMessage = (text: string) => {
+    if ('speechSynthesis' in window) {
+      // Cancel any ongoing speech
+      window.speechSynthesis.cancel();
+      
+      const utterance = new SpeechSynthesisUtterance(text);
+      
+      // Get available voices and select a natural-sounding one
+      const voices = window.speechSynthesis.getVoices();
+      const preferredVoices = voices.filter(voice => 
+        voice.lang.includes('en') && 
+        (voice.name.includes('Google') || voice.name.includes('Microsoft'))
+      );
+      
+      if (preferredVoices.length > 0) {
+        utterance.voice = preferredVoices[0];
+      }
+      
+      // Configure utterance
+      utterance.rate = 1.0;
+      utterance.pitch = 1.0;
+      utterance.volume = 1.0;
+      
+      // Speak the message
+      window.speechSynthesis.speak(utterance);
+      
+      console.log('Speaking message with voice:', utterance.voice?.name);
+    }
+  };
+
+  const getBotResponse = async (userMessage: string) => {
     try {
-      const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/chat`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ messages: messageHistory }),
+      const { data, error } = await supabase.functions.invoke('chat', {
+        body: { message: userMessage }
       });
 
-      if (!response.ok) throw new Error('Failed to get response');
+      if (error) {
+        console.error('Error getting bot response:', error);
+        setMessages(prev => [...prev, {
+          id: Date.now(),
+          text: 'Sorry, I encountered an error. Please try again.',
+          sender: 'bot',
+          timestamp: new Date()
+        }]);
+        return;
+      }
 
-      const data = await response.json();
-      return data.response;
+      if (data) {
+        setMessages(prev => [...prev, {
+          id: Date.now(),
+          text: data.response,
+          sender: 'bot',
+          timestamp: new Date()
+        }]);
+        if (isSoundEnabled) {
+          speakMessage(data.response);
+        }
+      }
     } catch (error) {
-      console.error('Error getting bot response:', error);
-      return "I'm having trouble thinking right now. Could you try again?";
+      console.error('Error in getBotResponse:', error);
+      setMessages(prev => [...prev, {
+        id: Date.now(),
+        text: 'Sorry, I encountered an error. Please try again.',
+        sender: 'bot',
+        timestamp: new Date()
+      }]);
     }
   };
 
@@ -71,32 +196,15 @@ const ChatInterface: React.FC = () => {
       id: Date.now(),
       text: inputText,
       sender: 'user',
-      timestamp: new Date(),
+      timestamp: new Date()
     };
 
     setMessages(prev => [...prev, newMessage]);
     setInputText('');
     setIsTyping(true);
 
-    if (isSoundEnabled) {
-      messageSound.current.play().catch(() => {});
-    }
-
-    const botResponse = await getBotResponse([...messages, newMessage]);
-    
-    const botMessage: Message = {
-      id: Date.now(),
-      text: botResponse,
-      sender: 'bot',
-      timestamp: new Date(),
-    };
-
-    setMessages(prev => [...prev, botMessage]);
+    await getBotResponse(inputText);
     setIsTyping(false);
-
-    if (isSoundEnabled) {
-      messageSound.current.play().catch(() => {});
-    }
   };
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
@@ -123,23 +231,52 @@ const ChatInterface: React.FC = () => {
     window.location.reload();
   };
 
-  const handleVoiceInput = (text: string) => {
-    setInputText(text);
-    handleSendMessage();
+  const handleVoiceInput = async (text: string) => {
+    if (text.trim()) {
+      setInputText(text);
+      await handleSendMessage();
+      setInputText('');
+    }
   };
 
   const toggleVoiceMode = () => {
-    const newVoiceMode = !isVoiceMode;
-    setIsVoiceMode(newVoiceMode);
-    setIsRecording(newVoiceMode); // Start recording immediately when voice mode is enabled
+    if (isVoiceModeActive) {
+      setIsVoiceModeActive(false);
+    } else {
+      setIsVoiceModeActive(true);
+    }
   };
 
   const handleRecordingChange = (recording: boolean) => {
     setIsRecording(recording);
     if (!recording) {
-      setIsVoiceMode(false); // Disable voice mode when recording stops
+      setIsVoiceModeActive(false);
     }
   };
+
+  if (!isInitialized) {
+    return (
+      <div className="min-h-screen bg-space-black flex items-center justify-center">
+        <div className="animate-pulse text-electric-blue text-xl">Initializing chat...</div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="min-h-screen bg-space-black text-white flex flex-col items-center justify-center p-4">
+        <h1 className="text-4xl font-bold mb-4">Error</h1>
+        <p className="text-gray-400 mb-4">{error}</p>
+        <button
+          onClick={() => setError(null)}
+          className="bg-electric-blue text-space-black font-bold py-3 px-8 rounded-full 
+                   transition-all duration-300 hover:shadow-[0_0_15px_rgba(0,240,255,0.7)]"
+        >
+          Try Again
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col h-screen bg-space-black">
@@ -224,17 +361,17 @@ const ChatInterface: React.FC = () => {
           <div className="flex items-end gap-2">
             <motion.button
               onClick={toggleVoiceMode}
-              className={`p-2 rounded-full transition-colors ${isVoiceMode ? 'bg-electric-blue' : 'hover:bg-space-gray'}`}
+              className={`p-2 rounded-full transition-colors ${isVoiceModeActive ? 'bg-electric-blue' : 'hover:bg-space-gray'}`}
               animate={isRecording ? { scale: [1, 1.1, 1] } : {}}
               transition={{ repeat: Infinity, duration: 1 }}
               whileHover={{ scale: 1.05 }}
               whileTap={{ scale: 0.95 }}
             >
-              <Mic className={`w-5 h-5 ${isVoiceMode ? 'text-space-black' : 'text-gray-400'}`} />
+              <Mic className={`w-5 h-5 ${isVoiceModeActive ? 'text-space-black' : 'text-gray-400'}`} />
             </motion.button>
             
             <div className="flex-1 bg-space-gray rounded-xl">
-              {isVoiceMode ? (
+              {isVoiceModeActive ? (
                 <VoiceRecorder 
                   onTranscription={handleVoiceInput}
                   isRecording={isRecording}
