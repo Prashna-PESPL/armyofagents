@@ -7,26 +7,29 @@ import ChatMessage from './ChatMessage';
 import VoiceRecorder from './VoiceRecorder';
 import { Message } from '../../types';
 import { supabase } from '../../lib/supabase';
+import { conversationExamples } from '../../data/conversations';
+import { conversationGuidelines } from '../../data/conversationGuidelines';
 
-const ChatInterface: React.FC = () => {
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      id: Date.now(),
-      text: "Hey there! I'm your AI pal, ready to chat and get to know you. What's your name?",
-      sender: 'bot',
-      timestamp: new Date(),
-    }
-  ]);
-  const [inputText, setInputText] = useState('');
+interface ChatInterfaceProps {
+  agentType: string;
+}
+
+const ChatInterface: React.FC<ChatInterfaceProps> = ({ agentType }) => {
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [input, setInput] = useState('');
+  const [isRecording, setIsRecording] = useState(false);
   const [isTyping, setIsTyping] = useState(false);
   const [isSoundEnabled, setIsSoundEnabled] = useState(true);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isInitialized, setIsInitialized] = useState(false);
+  const [agentName, setAgentName] = useState<string | null>(null);
+  const [isAskingForName, setIsAskingForName] = useState(true);
   
   const chatContainerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const messageSound = useRef<HTMLAudioElement | null>(null);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     let mounted = true;
@@ -84,6 +87,16 @@ const ChatInterface: React.FC = () => {
     }
   }, [messages, isInitialized]);
 
+  useEffect(() => {
+    // Initialize with conversation example for the selected agent type
+    setMessages(conversationExamples[agentType] || []);
+  }, [agentType]);
+
+  useEffect(() => {
+    // Scroll to bottom when messages change
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
+
   const scrollToBottom = () => {
     if (chatContainerRef.current) {
       chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
@@ -115,6 +128,38 @@ const ChatInterface: React.FC = () => {
 
   const getBotResponse = async (userMessage: string) => {
     try {
+      if (isAskingForName) {
+        if (userMessage.toLowerCase().includes('yes') || userMessage.toLowerCase().includes('sure') || userMessage.toLowerCase().includes('okay')) {
+          setMessages(prev => [...prev, {
+            id: Date.now(),
+            text: "Great! What would you like to call me?",
+            sender: 'bot',
+            timestamp: new Date()
+          }]);
+          return;
+        } else if (userMessage.toLowerCase().includes('no') || userMessage.toLowerCase().includes('not')) {
+          setMessages(prev => [...prev, {
+            id: Date.now(),
+            text: "No problem! I'll keep my default name. How can I help you today?",
+            sender: 'bot',
+            timestamp: new Date()
+          }]);
+          setIsAskingForName(false);
+          return;
+        } else if (!agentName) {
+          // This is the name they want to give
+          setAgentName(userMessage);
+          setMessages(prev => [...prev, {
+            id: Date.now(),
+            text: `Thank you! I love the name ${userMessage}. How can I help you today?`,
+            sender: 'bot',
+            timestamp: new Date()
+          }]);
+          setIsAskingForName(false);
+          return;
+        }
+      }
+
       // Format messages to include conversation history
       const messageHistory = messages.slice(-5); // Get last 5 messages for context
       messageHistory.push({
@@ -173,28 +218,36 @@ const ChatInterface: React.FC = () => {
     }
   };
 
-  const handleSendMessage = async () => {
-    if (!inputText.trim()) return;
+  const handleSend = () => {
+    if (!input.trim()) return;
 
-    const newMessage: Message = {
-      id: Date.now(),
-      text: inputText,
+    const userMessage: Message = {
+      id: messages.length + 1,
+      text: input,
       sender: 'user',
       timestamp: new Date()
     };
 
-    setMessages(prev => [...prev, newMessage]);
-    setInputText('');
-    setIsTyping(true);
+    setMessages(prev => [...prev, userMessage]);
+    setInput('');
 
-    await getBotResponse(inputText);
-    setIsTyping(false);
+    // Simulate bot response
+    const botMessage: Message = {
+      id: messages.length + 2,
+      text: conversationGuidelines.initiation.initialMessage,
+      sender: 'bot',
+      timestamp: new Date()
+    };
+
+    setTimeout(() => {
+      setMessages(prev => [...prev, botMessage]);
+    }, 1000);
   };
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      handleSendMessage();
+      handleSend();
     }
   };
 
@@ -206,7 +259,7 @@ const ChatInterface: React.FC = () => {
   };
 
   const handleEmojiClick = (emojiData: any) => {
-    setInputText(prev => prev + emojiData.emoji);
+    setInput(prev => prev + emojiData.emoji);
     setShowEmojiPicker(false);
     inputRef.current?.focus();
   };
@@ -216,33 +269,30 @@ const ChatInterface: React.FC = () => {
   };
 
   const handleVoiceInput = async (text: string) => {
-    if (text.trim()) {
-      console.log('Received voice input:', text);
-      
-      // Add the user's message to the chat
-      const newMessage: Message = {
+    if (!text.trim()) return;
+
+    const newMessage: Message = {
+      id: messages.length + 1,
+      text: text,
+      sender: 'user',
+      timestamp: new Date()
+    };
+    setMessages(prev => [...prev, newMessage]);
+    
+    // Get bot's response
+    setIsTyping(true);
+    try {
+      await getBotResponse(text.trim());
+    } catch (error) {
+      console.error('Error getting bot response for voice input:', error);
+      setMessages(prev => [...prev, {
         id: Date.now(),
-        text: text.trim(),
-        sender: 'user',
+        text: 'Sorry, I encountered an error processing your voice input. Please try again.',
+        sender: 'bot',
         timestamp: new Date()
-      };
-      setMessages(prev => [...prev, newMessage]);
-      
-      // Get bot's response
-      setIsTyping(true);
-      try {
-        await getBotResponse(text.trim());
-      } catch (error) {
-        console.error('Error getting bot response for voice input:', error);
-        setMessages(prev => [...prev, {
-          id: Date.now(),
-          text: 'Sorry, I encountered an error processing your voice input. Please try again.',
-          sender: 'bot',
-          timestamp: new Date()
-        }]);
-      } finally {
-        setIsTyping(false);
-      }
+      }]);
+    } finally {
+      setIsTyping(false);
     }
   };
 
@@ -339,6 +389,7 @@ const ChatInterface: React.FC = () => {
             </motion.div>
           )}
         </AnimatePresence>
+        <div ref={messagesEndRef} />
       </div>
 
       {/* Input Area */}
@@ -355,8 +406,8 @@ const ChatInterface: React.FC = () => {
               <VoiceRecorder onTranscription={handleVoiceInput} />
               <textarea
                 ref={inputRef}
-                value={inputText}
-                onChange={(e) => setInputText(e.target.value)}
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
                 onKeyPress={handleKeyPress}
                 placeholder="Type your message..."
                 className="w-full bg-transparent border-none p-3 focus:outline-none resize-none"
@@ -372,8 +423,8 @@ const ChatInterface: React.FC = () => {
             </button>
             
             <button
-              onClick={handleSendMessage}
-              disabled={!inputText.trim()}
+              onClick={handleSend}
+              disabled={!input.trim()}
               className="p-2 bg-electric-blue text-space-black rounded-full transition-all duration-300 hover:shadow-[0_0_15px_rgba(0,240,255,0.7)] disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <Send className="w-5 h-5" />

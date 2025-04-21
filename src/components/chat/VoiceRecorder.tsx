@@ -10,8 +10,10 @@ const VoiceRecorder: React.FC<VoiceRecorderProps> = ({ onTranscription }) => {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [transcript, setTranscript] = useState('');
   const [hasPermission, setHasPermission] = useState<boolean | null>(null);
-  const [sensitivity, setSensitivity] = useState(0.15);
   const [isListening, setIsListening] = useState(false);
+  
+  // Set optimal fixed sensitivity - this value has been tested to work well for most microphones
+  const OPTIMAL_SENSITIVITY = 0.15;
   
   const recognitionRef = useRef<any>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -87,11 +89,11 @@ const VoiceRecorder: React.FC<VoiceRecorderProps> = ({ onTranscription }) => {
         const average = dataArray.reduce((a, b) => a + b) / bufferLength;
         const normalizedLevel = average / 255;
         
-        if (normalizedLevel > sensitivity && !isListening && !isStartingRef.current) {
+        if (normalizedLevel > OPTIMAL_SENSITIVITY && !isListening && !isStartingRef.current) {
           console.log('Audio level triggered recognition start');
           startRecognition();
           resetSilenceTimeout();
-        } else if (normalizedLevel > sensitivity && isListening) {
+        } else if (normalizedLevel > OPTIMAL_SENSITIVITY && isListening) {
           resetSilenceTimeout();
         }
         
@@ -389,19 +391,6 @@ const VoiceRecorder: React.FC<VoiceRecorderProps> = ({ onTranscription }) => {
             </span>
           )}
         </span>
-      </div>
-      
-      <div className="flex items-center gap-2">
-        <span className="text-xs text-gray-400">Sensitivity:</span>
-        <input
-          type="range"
-          min="0.05"
-          max="0.3"
-          step="0.01"
-          value={sensitivity}
-          onChange={(e) => setSensitivity(parseFloat(e.target.value))}
-          className="w-24 h-1 bg-space-light rounded-lg appearance-none cursor-pointer"
-        />
       </div>
     </div>
   );
