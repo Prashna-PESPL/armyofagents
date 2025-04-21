@@ -154,7 +154,7 @@ const BFFBotPage: React.FC = () => {
         </div>
       ) : (
         <div className="container mx-auto px-4 py-8">
-          <ChatInterface />
+          <ChatInterface agentType="BFF Bot" />
         </div>
       )}
     </div>

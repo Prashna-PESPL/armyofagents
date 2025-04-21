@@ -7,28 +7,29 @@ import ChatMessage from './ChatMessage';
 import VoiceRecorder from './VoiceRecorder';
 import { Message } from '../../types';
 import { supabase } from '../../lib/supabase';
+import { conversationExamples } from '../../data/conversations';
+import { conversationGuidelines } from '../../data/conversationGuidelines';
 
-const ChatInterface: React.FC = () => {
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      id: Date.now(),
-      text: "Hey there! I'm your AI pal, ready to chat and get to know you. What's your name?",
-      sender: 'bot',
-      timestamp: new Date(),
-    }
-  ]);
-  const [inputText, setInputText] = useState('');
+interface ChatInterfaceProps {
+  agentType: string;
+}
+
+const ChatInterface: React.FC<ChatInterfaceProps> = ({ agentType }) => {
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [input, setInput] = useState('');
+  const [isRecording, setIsRecording] = useState(false);
   const [isTyping, setIsTyping] = useState(false);
   const [isSoundEnabled, setIsSoundEnabled] = useState(true);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
-  const [isVoiceModeActive, setIsVoiceModeActive] = useState(false);
-  const [isRecording, setIsRecording] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isInitialized, setIsInitialized] = useState(false);
+  const [agentName, setAgentName] = useState<string | null>(null);
+  const [isAskingForName, setIsAskingForName] = useState(true);
   
   const chatContainerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const messageSound = useRef<HTMLAudioElement | null>(null);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     let mounted = true;
@@ -61,29 +62,6 @@ const ChatInterface: React.FC = () => {
           setIsSoundEnabled(false);
         }
         
-        // Initialize speech synthesis
-        if ('speechSynthesis' in window) {
-          const voices = window.speechSynthesis.getVoices();
-          if (voices.length === 0) {
-            window.speechSynthesis.onvoiceschanged = () => {
-              console.log('Speech synthesis voices loaded');
-              // Test speech synthesis after voices are loaded
-              if (mounted) {
-                speakMessage('Welcome to Army of Agents!');
-              }
-            };
-          } else {
-            // Test speech synthesis immediately if voices are already loaded
-            if (mounted) {
-              speakMessage('Welcome to Army of Agents!');
-            }
-          }
-          console.log('Speech synthesis initialized with', voices.length, 'voices');
-        } else {
-          console.warn('Speech synthesis not supported in this browser');
-          setIsSoundEnabled(false);
-        }
-
         if (mounted) {
           setIsInitialized(true);
           scrollToBottom();
@@ -114,6 +92,16 @@ const ChatInterface: React.FC = () => {
     }
   }, [messages, isInitialized]);
 
+  useEffect(() => {
+    // Initialize with conversation example for the selected agent type
+    setMessages(conversationExamples[agentType] || []);
+  }, [agentType]);
+
+  useEffect(() => {
+    // Scroll to bottom when messages change
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
+
   const scrollToBottom = () => {
     if (chatContainerRef.current) {
       chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
@@ -121,13 +109,10 @@ const ChatInterface: React.FC = () => {
   };
 
   const speakMessage = (text: string) => {
-    if ('speechSynthesis' in window) {
-      // Cancel any ongoing speech
+    if ('speechSynthesis' in window && isSoundEnabled) {
       window.speechSynthesis.cancel();
       
       const utterance = new SpeechSynthesisUtterance(text);
-      
-      // Get available voices and select a natural-sounding one
       const voices = window.speechSynthesis.getVoices();
       const preferredVoices = voices.filter(voice => 
         voice.lang.includes('en') && 
@@ -138,12 +123,10 @@ const ChatInterface: React.FC = () => {
         utterance.voice = preferredVoices[0];
       }
       
-      // Configure utterance
       utterance.rate = 1.0;
       utterance.pitch = 1.0;
       utterance.volume = 1.0;
       
-      // Speak the message
       window.speechSynthesis.speak(utterance);
       
       console.log('Speaking message with voice:', utterance.voice?.name);
@@ -152,8 +135,78 @@ const ChatInterface: React.FC = () => {
 
   const getBotResponse = async (userMessage: string) => {
     try {
+      if (isAskingForName) {
+        if (userMessage.toLowerCase().includes('yes') || userMessage.toLowerCase().includes('sure') || userMessage.toLowerCase().includes('okay')) {
+          setMessages(prev => [...prev, {
+            id: Date.now(),
+            text: "Great! What would you like to call me?",
+            sender: 'bot',
+            timestamp: new Date()
+          }]);
+          return;
+        } else if (userMessage.toLowerCase().includes('no') || userMessage.toLowerCase().includes('not')) {
+          setMessages(prev => [...prev, {
+            id: Date.now(),
+            text: "No problem! I'll keep my default name. How can I help you today?",
+            sender: 'bot',
+            timestamp: new Date()
+          }]);
+          setIsAskingForName(false);
+          return;
+        } else if (!agentName) {
+          // Extract the actual name from common name introduction patterns
+          let extractedName = userMessage;
+          const namePatterns = [
+            /my name is\s+(\w+)/i,
+            /i am\s+(\w+)/i,
+            /i'm\s+(\w+)/i,
+            /call me\s+(\w+)/i,
+            /name's\s+(\w+)/i,
+            /(\w+)\s+is my name/i
+          ];
+
+          for (const pattern of namePatterns) {
+            const match = userMessage.match(pattern);
+            if (match && match[1]) {
+              extractedName = match[1];
+              break;
+            }
+          }
+
+          // If no pattern matches, take the first word that's not a common introduction word
+          if (extractedName === userMessage) {
+            const words = userMessage.split(/\s+/);
+            const commonWords = ['my', 'name', 'is', 'i', 'am', "i'm", 'call', 'me'];
+            extractedName = words.find(word => !commonWords.includes(word.toLowerCase())) || words[0];
+          }
+
+          // Capitalize the first letter of the name
+          extractedName = extractedName.charAt(0).toUpperCase() + extractedName.slice(1).toLowerCase();
+          
+          setAgentName(extractedName);
+          setMessages(prev => [...prev, {
+            id: Date.now(),
+            text: `Nice to meet you, ${extractedName}! Would you like to give me a name too?`,
+            sender: 'bot',
+            timestamp: new Date()
+          }]);
+          return;
+        }
+      }
+
+      // Format messages to include conversation history
+      const messageHistory = messages.slice(-5); // Get last 5 messages for context
+      messageHistory.push({
+        id: Date.now(),
+        text: userMessage,
+        sender: 'user' as const,
+        timestamp: new Date()
+      });
+
+      console.log('Sending message to bot:', { userMessage, messageHistory });
+      
       const { data, error } = await supabase.functions.invoke('chat', {
-        body: { message: userMessage }
+        body: { messages: messageHistory }
       });
 
       if (error) {
@@ -161,56 +214,74 @@ const ChatInterface: React.FC = () => {
         setMessages(prev => [...prev, {
           id: Date.now(),
           text: 'Sorry, I encountered an error. Please try again.',
-          sender: 'bot',
+          sender: 'bot' as const,
           timestamp: new Date()
         }]);
         return;
       }
 
-      if (data) {
-        setMessages(prev => [...prev, {
+      if (data?.response) {
+        console.log('Received bot response:', data.response);
+        const botMessage = {
           id: Date.now(),
           text: data.response,
-          sender: 'bot',
+          sender: 'bot' as const,
           timestamp: new Date()
-        }]);
+        };
+        setMessages(prev => [...prev, botMessage]);
         if (isSoundEnabled) {
           speakMessage(data.response);
         }
+      } else {
+        console.error('No response data from bot');
+        setMessages(prev => [...prev, {
+          id: Date.now(),
+          text: 'Sorry, I did not receive a proper response. Please try again.',
+          sender: 'bot' as const,
+          timestamp: new Date()
+        }]);
       }
     } catch (error) {
       console.error('Error in getBotResponse:', error);
       setMessages(prev => [...prev, {
         id: Date.now(),
         text: 'Sorry, I encountered an error. Please try again.',
-        sender: 'bot',
+        sender: 'bot' as const,
         timestamp: new Date()
       }]);
     }
   };
 
-  const handleSendMessage = async () => {
-    if (!inputText.trim()) return;
+  const handleSend = () => {
+    if (!input.trim()) return;
 
-    const newMessage: Message = {
-      id: Date.now(),
-      text: inputText,
+    const userMessage: Message = {
+      id: messages.length + 1,
+      text: input,
       sender: 'user',
       timestamp: new Date()
     };
 
-    setMessages(prev => [...prev, newMessage]);
-    setInputText('');
-    setIsTyping(true);
+    setMessages(prev => [...prev, userMessage]);
+    setInput('');
 
-    await getBotResponse(inputText);
-    setIsTyping(false);
+    // Simulate bot response
+    const botMessage: Message = {
+      id: messages.length + 2,
+      text: conversationGuidelines.initiation.initialMessage,
+      sender: 'bot',
+      timestamp: new Date()
+    };
+
+    setTimeout(() => {
+      setMessages(prev => [...prev, botMessage]);
+    }, 1000);
   };
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      handleSendMessage();
+      handleSend();
     }
   };
 
@@ -222,7 +293,7 @@ const ChatInterface: React.FC = () => {
   };
 
   const handleEmojiClick = (emojiData: any) => {
-    setInputText(prev => prev + emojiData.emoji);
+    setInput(prev => prev + emojiData.emoji);
     setShowEmojiPicker(false);
     inputRef.current?.focus();
   };
@@ -232,25 +303,45 @@ const ChatInterface: React.FC = () => {
   };
 
   const handleVoiceInput = async (text: string) => {
-    if (text.trim()) {
-      setInputText(text);
-      await handleSendMessage();
-      setInputText('');
+    if (!text.trim()) return;
+
+    const newMessage: Message = {
+      id: messages.length + 1,
+      text: text,
+      sender: 'user',
+      timestamp: new Date()
+    };
+    setMessages(prev => [...prev, newMessage]);
+    
+    // Get bot's response
+    setIsTyping(true);
+    try {
+      await getBotResponse(text.trim());
+    } catch (error) {
+      console.error('Error getting bot response for voice input:', error);
+      setMessages(prev => [...prev, {
+        id: Date.now(),
+        text: 'Sorry, I encountered an error processing your voice input. Please try again.',
+        sender: 'bot',
+        timestamp: new Date()
+      }]);
+    } finally {
+      setIsTyping(false);
     }
   };
 
   const toggleVoiceMode = () => {
-    if (isVoiceModeActive) {
-      setIsVoiceModeActive(false);
+    if (isRecording) {
+      setIsRecording(false);
     } else {
-      setIsVoiceModeActive(true);
+      setIsRecording(true);
     }
   };
 
   const handleRecordingChange = (recording: boolean) => {
     setIsRecording(recording);
     if (!recording) {
-      setIsVoiceModeActive(false);
+      setIsTyping(false);
     }
   };
 
@@ -347,6 +438,7 @@ const ChatInterface: React.FC = () => {
             </motion.div>
           )}
         </AnimatePresence>
+        <div ref={messagesEndRef} />
       </div>
 
       {/* Input Area */}
@@ -361,33 +453,26 @@ const ChatInterface: React.FC = () => {
           <div className="flex items-end gap-2">
             <motion.button
               onClick={toggleVoiceMode}
-              className={`p-2 rounded-full transition-colors ${isVoiceModeActive ? 'bg-electric-blue' : 'hover:bg-space-gray'}`}
+              className={`p-2 rounded-full transition-colors ${isRecording ? 'bg-electric-blue' : 'hover:bg-space-gray'}`}
               animate={isRecording ? { scale: [1, 1.1, 1] } : {}}
               transition={{ repeat: Infinity, duration: 1 }}
               whileHover={{ scale: 1.05 }}
               whileTap={{ scale: 0.95 }}
             >
-              <Mic className={`w-5 h-5 ${isVoiceModeActive ? 'text-space-black' : 'text-gray-400'}`} />
+              <Mic className={`w-5 h-5 ${isRecording ? 'text-space-black' : 'text-gray-400'}`} />
             </motion.button>
             
             <div className="flex-1 bg-space-gray rounded-xl">
-              {isVoiceModeActive ? (
-                <VoiceRecorder 
-                  onTranscription={handleVoiceInput}
-                  isRecording={isRecording}
-                  onRecordingChange={handleRecordingChange}
-                />
-              ) : (
-                <textarea
-                  ref={inputRef}
-                  value={inputText}
-                  onChange={(e) => setInputText(e.target.value)}
-                  onKeyPress={handleKeyPress}
-                  placeholder="Type your message..."
-                  className="w-full bg-transparent border-none p-3 focus:outline-none resize-none"
-                  rows={1}
-                />
-              )}
+              <VoiceRecorder onTranscription={handleVoiceInput} />
+              <textarea
+                ref={inputRef}
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyPress={handleKeyPress}
+                placeholder="Type your message..."
+                className="w-full bg-transparent border-none p-3 focus:outline-none resize-none"
+                rows={1}
+              />
             </div>
             
             <button
@@ -398,8 +483,8 @@ const ChatInterface: React.FC = () => {
             </button>
             
             <button
-              onClick={handleSendMessage}
-              disabled={!inputText.trim()}
+              onClick={handleSend}
+              disabled={!input.trim()}
               className="p-2 bg-electric-blue text-space-black rounded-full transition-all duration-300 hover:shadow-[0_0_15px_rgba(0,240,255,0.7)] disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <Send className="w-5 h-5" />
