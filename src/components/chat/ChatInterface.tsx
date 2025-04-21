@@ -147,15 +147,42 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ agentType }) => {
           setIsAskingForName(false);
           return;
         } else if (!agentName) {
-          // This is the name they want to give
-          setAgentName(userMessage);
+          // Extract the actual name from common name introduction patterns
+          let extractedName = userMessage;
+          const namePatterns = [
+            /my name is\s+(\w+)/i,
+            /i am\s+(\w+)/i,
+            /i'm\s+(\w+)/i,
+            /call me\s+(\w+)/i,
+            /name's\s+(\w+)/i,
+            /(\w+)\s+is my name/i
+          ];
+
+          for (const pattern of namePatterns) {
+            const match = userMessage.match(pattern);
+            if (match && match[1]) {
+              extractedName = match[1];
+              break;
+            }
+          }
+
+          // If no pattern matches, take the first word that's not a common introduction word
+          if (extractedName === userMessage) {
+            const words = userMessage.split(/\s+/);
+            const commonWords = ['my', 'name', 'is', 'i', 'am', "i'm", 'call', 'me'];
+            extractedName = words.find(word => !commonWords.includes(word.toLowerCase())) || words[0];
+          }
+
+          // Capitalize the first letter of the name
+          extractedName = extractedName.charAt(0).toUpperCase() + extractedName.slice(1).toLowerCase();
+          
+          setAgentName(extractedName);
           setMessages(prev => [...prev, {
             id: Date.now(),
-            text: `Thank you! I love the name ${userMessage}. How can I help you today?`,
+            text: `Nice to meet you, ${extractedName}! Would you like to give me a name too?`,
             sender: 'bot',
             timestamp: new Date()
           }]);
-          setIsAskingForName(false);
           return;
         }
       }
